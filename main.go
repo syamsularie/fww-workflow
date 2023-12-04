@@ -62,7 +62,7 @@ func main() {
 	go zbClient.NewJobWorker().JobType("check-pedulilindungi").Handler(handleCheckPeduliLindungi).Open()
 	go zbClient.NewJobWorker().JobType("send-email-booking").Handler(handleSendEmailBooking).Open()
 	go zbClient.NewJobWorker().JobType("send-email-unpaid").Handler(handleSendEmailUnpaid).Open()
-	go zbClient.NewJobWorker().JobType("check-payment-status").Handler(handleSendEmailUnpaid).Open()
+	go zbClient.NewJobWorker().JobType("check-payment-status").Handler(handleCheckPaymentStatus).Open()
 
 	// res, err := zbClient.NewCompleteJobCommand().JobKey(4503599628408446).Send(ctx)
 	// fmt.Println("Complete user task", res, err)
@@ -434,7 +434,7 @@ func handleCheckPaymentStatus(client worker.JobClient, job entities.Job) {
 	}
 	reservationId, _ := variables["reservationId"].(float64)
 	paymentStatusApiURL := "http://localhost:3002/payment/detail/reservation/" + strconv.FormatFloat(reservationId, 'f', -1, 64)
-
+	fmt.Println("payment status :", reservationId, paymentStatusApiURL)
 	response, err := http.Get(paymentStatusApiURL)
 	if err != nil {
 		fmt.Println("Error making request:", err)
@@ -454,13 +454,14 @@ func handleCheckPaymentStatus(client worker.JobClient, job entities.Job) {
 			return
 		}
 	}
-	var blacklistResp model.PaymentDetailResponse
-	err = json.Unmarshal(responseBody, &blacklistResp)
+	var paymentResp model.PaymentDetailResponse
+	err = json.Unmarshal(responseBody, &paymentResp)
 	if err != nil {
 		fmt.Println("Error unmarshal body:", err)
 		return
 	}
-	variables["statusPayment"] = blacklistResp.PaymentStatus
+	fmt.Println(paymentResp)
+	variables["statusPayment"] = paymentResp.PaymentStatus
 	request, err := client.NewCompleteJobCommand().JobKey(jobKey).VariablesFromMap(variables)
 	if err != nil {
 		// failed to set the updated variables
