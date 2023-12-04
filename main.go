@@ -60,6 +60,7 @@ func main() {
 	go zbClient.NewJobWorker().JobType("check-dukcapil").Handler(handleCheckDukcapil).Open()
 	go zbClient.NewJobWorker().JobType("check-pedulilindungi").Handler(handleCheckPeduliLindungi).Open()
 	go zbClient.NewJobWorker().JobType("send-email-booking").Handler(handleSendEmailBooking).Open()
+	go zbClient.NewJobWorker().JobType("send-email-unpaid").Handler(handleSendEmailUnpaid).Open()
 
 	// res, err := zbClient.NewCompleteJobCommand().JobKey(4503599628408446).Send(ctx)
 	// fmt.Println("Complete user task", res, err)
@@ -223,7 +224,7 @@ func handleCheckDukcapil(client worker.JobClient, job entities.Job) {
 			return
 		}
 	}
-	var blacklistResp model.RegulationtResponse
+	var blacklistResp model.RegulationtResponseString
 	err = json.Unmarshal(responseBody, &blacklistResp)
 	if err != nil {
 		fmt.Println("Error unmarshal body:", err)
@@ -286,7 +287,7 @@ func handleCheckPeduliLindungi(client worker.JobClient, job entities.Job) {
 			return
 		}
 	}
-	var blacklistResp model.RegulationtResponse
+	var blacklistResp model.RegulationtResponseString
 	err = json.Unmarshal(responseBody, &blacklistResp)
 	if err != nil {
 		fmt.Println("Error unmarshal body:", err)
@@ -322,6 +323,29 @@ func handleSendEmailBooking(client worker.JobClient, job entities.Job) {
 		failJob(client, job)
 		return
 	}
+	fmt.Println(variables)
+	sendEmailURL := "http://localhost:3002/send-email"
+
+	reservationId, _ := variables["reservationId"].(float64)
+	userId := model.ReqEmail{
+		ReservationId: int(reservationId),
+	}
+	fmt.Println("reservation ID: ", variables["reservationId"].(float64))
+	payload, _ := json.Marshal(userId)
+
+	response, err := http.Post(sendEmailURL, "application/json", bytes.NewBuffer(payload))
+	if err != nil {
+		fmt.Println("Error making request:", err)
+		return
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		fmt.Println("Error http request:", err, response.StatusCode)
+		return
+	}
+	fmt.Println("Succesfully send email reservation")
+	variables["sendEmailReservation"] = "success"
 
 	request, err := client.NewCompleteJobCommand().JobKey(jobKey).VariablesFromMap(variables)
 	if err != nil {
@@ -338,7 +362,61 @@ func handleSendEmailBooking(client worker.JobClient, job entities.Job) {
 		panic(err)
 	}
 
-	log.Println("Successfully check peduli lindungi completed job")
+	log.Println("Successfully check send email reservation completed job")
+
+	// close(readyClose)
+}
+
+// send email unpaid
+func handleSendEmailUnpaid(client worker.JobClient, job entities.Job) {
+	jobKey := job.GetKey()
+
+	variables, err := job.GetVariablesAsMap()
+	if err != nil {
+		// failed to handle job as we require the variables
+		failJob(client, job)
+		return
+	}
+	fmt.Println(variables)
+	sendEmailURL := "http://localhost:3002/send-email"
+
+	reservationId, _ := variables["reservationId"].(float64)
+	userId := model.ReqEmail{
+		ReservationId: int(reservationId),
+	}
+	fmt.Println("reservation ID: ", variables["reservationId"].(float64))
+	payload, _ := json.Marshal(userId)
+
+	response, err := http.Post(sendEmailURL, "application/json", bytes.NewBuffer(payload))
+	if err != nil {
+		fmt.Println("Error making request:", err)
+		return
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		fmt.Println("Error http request:", err, response.StatusCode)
+		return
+	}
+	fmt.Println("Succesfully send email reservation")
+	variables["sendEmail"] = "success"
+
+	request, err := client.NewCompleteJobCommand().JobKey(jobKey).VariablesFromMap(variables)
+	if err != nil {
+		// failed to set the updated variables
+		failJob(client, job)
+		return
+	}
+
+	log.Println("Complete job", jobKey, "of type", job.Type)
+
+	ctx := context.Background()
+	_, err = request.Send(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	log.Println("Successfully check send email reservation completed job")
 
 	// close(readyClose)
 }
