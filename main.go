@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"workflow-engine/internal/model"
 
 	"github.com/camunda/zeebe/clients/go/v8/pkg/entities"
@@ -61,6 +62,7 @@ func main() {
 	go zbClient.NewJobWorker().JobType("check-pedulilindungi").Handler(handleCheckPeduliLindungi).Open()
 	go zbClient.NewJobWorker().JobType("send-email-booking").Handler(handleSendEmailBooking).Open()
 	go zbClient.NewJobWorker().JobType("send-email-unpaid").Handler(handleSendEmailUnpaid).Open()
+	go zbClient.NewJobWorker().JobType("check-payment-status").Handler(handleSendEmailUnpaid).Open()
 
 	// res, err := zbClient.NewCompleteJobCommand().JobKey(4503599628408446).Send(ctx)
 	// fmt.Println("Complete user task", res, err)
@@ -419,6 +421,62 @@ func handleSendEmailUnpaid(client worker.JobClient, job entities.Job) {
 	log.Println("Successfully check send email reservation completed job")
 
 	// close(readyClose)
+}
+
+func handleCheckPaymentStatus(client worker.JobClient, job entities.Job) {
+	jobKey := job.GetKey()
+
+	variables, err := job.GetVariablesAsMap()
+	if err != nil {
+		// failed to handle job as we require the variables
+		failJob(client, job)
+		return
+	}
+	reservationId, _ := variables["reservationId"].(float64)
+	paymentStatusApiURL := "http://localhost:3002/payment/detail/reservation/" + strconv.FormatFloat(reservationId, 'f', -1, 64)
+
+	response, err := http.Get(paymentStatusApiURL)
+	if err != nil {
+		fmt.Println("Error making request:", err)
+		return
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		fmt.Println("Error http request:", err)
+	}
+
+	var responseBody []byte
+	if response.Body != nil {
+		responseBody, err = io.ReadAll(response.Body)
+		if err != nil {
+			fmt.Println("Error read body:", err)
+			return
+		}
+	}
+	var blacklistResp model.PaymentDetailResponse
+	err = json.Unmarshal(responseBody, &blacklistResp)
+	if err != nil {
+		fmt.Println("Error unmarshal body:", err)
+		return
+	}
+	variables["statusPayment"] = blacklistResp.PaymentStatus
+	request, err := client.NewCompleteJobCommand().JobKey(jobKey).VariablesFromMap(variables)
+	if err != nil {
+		// failed to set the updated variables
+		failJob(client, job)
+		return
+	}
+
+	log.Println("Complete job", jobKey, "of type", job.Type)
+
+	ctx := context.Background()
+	_, err = request.Send(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	log.Println("Successfully check dukcapil completed job")
 }
 
 func failJob(client worker.JobClient, job entities.Job) {
